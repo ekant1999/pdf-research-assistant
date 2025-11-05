@@ -2,7 +2,7 @@
 Flask backend for PDF RAG system
 """
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 from pathlib import Path
@@ -11,12 +11,18 @@ from graph import create_graph, get_llm, load_vectorstore
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='frontend', static_url_path='')
 CORS(app)
 
 vectorstore = None
 graph = None
 current_settings = None
+
+def reset_graph_cache():
+    """Reset the graph cache to force recreation."""
+    global graph, current_settings
+    graph = None
+    current_settings = None
 
 
 def init_vectorstore():
@@ -40,29 +46,13 @@ def get_or_create_graph(provider="openai", model=None, k=6):
     
     settings = (provider, model, k)
     
+    # Always recreate graph if settings changed
     if graph is None or current_settings != settings:
         llm = get_llm(provider=provider, model=model)
         graph = create_graph(vectorstore, llm, k=k)
         current_settings = settings
     
     return graph
-
-
-@app.route("/", methods=["GET"])
-def index():
-    """Root endpoint - redirect to info."""
-    return jsonify({
-        "status": "ok",
-        "message": "PDF Research Assistant API",
-        "endpoints": {
-            "health": "/api/health",
-            "index_status": "/api/index/status",
-            "load_index": "/api/index/load (POST)",
-            "ask": "/api/ask (POST)",
-            "providers": "/api/providers"
-        },
-        "note": "Open frontend/index.html in your browser to use the UI"
-    })
 
 
 @app.route("/api/health", methods=["GET"])
@@ -129,10 +119,16 @@ def ask_question():
             # Set default based on provider
             if provider.lower() == "huggingface":
                 model = "mistralai/Mistral-7B-Instruct-v0.2"
+            elif provider.lower() == "chatgpt" or provider.lower() == "chatgpt-web" or provider.lower() == "chatgpt_app":
+                model = "default"
             else:
                 model = "gpt-4o-mini"
         
         k = data.get("k", 6)
+        
+        # Reset graph cache if provider changed to ensure we use the right LLM
+        if current_settings and current_settings[0] != provider.lower():
+            reset_graph_cache()
         
         try:
             graph = get_or_create_graph(provider=provider, model=model, k=k)
@@ -146,7 +142,7 @@ def ask_question():
             elif "quota" in error_msg.lower() or "insufficient_quota" in error_msg.lower():
                 return jsonify({
                     "status": "error",
-                    "message": "OpenAI API quota exceeded. Please check your billing at https://platform.openai.com/account/billing"
+                    "message": f"OpenAI API quota exceeded. Make sure you're using the ChatGPT App provider, not OpenAI API. Error: {error_msg}"
                 }), 400
             else:
                 return jsonify({
@@ -160,7 +156,10 @@ def ask_question():
             "answer": ""
         }
         
-        result = graph.invoke(initial_state)
+        try:
+            result = graph.invoke(initial_state)
+        except Exception as e:
+            raise
         
         seen_papers = {}
         sources_list = []
@@ -208,9 +207,36 @@ def get_providers():
                     "microsoft/DialoGPT-medium"
                 ],
                 "default": "mistralai/Mistral-7B-Instruct-v0.2"
+            },
+            "chatgpt": {
+                "models": ["default"],
+                "default": "default",
+                "note": "Uses ChatGPT web app (requires manual login)"
             }
         }
     })
+
+
+@app.route("/", methods=["GET"])
+def serve_index():
+    """Serve the frontend index.html."""
+    return send_file('frontend/index.html')
+
+@app.route("/<path:path>")
+def serve_frontend(path):
+    """Serve frontend static files (CSS, JS, etc.)."""
+    # Skip API routes
+    if path.startswith('api/'):
+        return jsonify({"error": "Not found"}), 404
+    
+    try:
+        file_path = Path('frontend') / path
+        if file_path.exists() and file_path.is_file():
+            return send_file(str(file_path))
+        else:
+            return jsonify({"error": "File not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 404
 
 
 if __name__ == "__main__":

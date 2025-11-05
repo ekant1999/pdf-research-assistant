@@ -1,0 +1,23 @@
+# Core dependencies
+flask>=2.3.0
+flask-cors>=4.0.0
+python-dotenv>=1.0.0
+
+# LangChain and LangGraph
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+langgraph>=0.0.20
+
+# Vector store and embeddings
+faiss-cpu>=1.7.4
+
+# PDF processing
+pypdf>=3.0.0
+
+# ChatGPT Web Integration (new)
+playwright>=1.40.0
+
+# Optional: Hugging Face support
+# langchain-huggingface>=0.0.1  # Uncomment if using Hugging Face models
+
