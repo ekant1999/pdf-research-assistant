@@ -199,27 +199,6 @@ The system also supports:
 - ChatGPT account (free)
 - Modern web browser (for React frontend)
 
-## Troubleshooting
-
-### ChatGPT Login Issues
-
-- **"ChatGPT requires login"**: Make sure you're logged into ChatGPT in the browser window that opened
-- **Browser not opening**: Check that Playwright is installed: `playwright --version` and `playwright install chromium`
-- **Session not persisting**: Check that `~/.chatgpt-browser` directory exists and has proper permissions
-
-### No Response from ChatGPT
-
-- ChatGPT may be slow to respond - wait a bit longer
-- The page structure may have changed - check ChatGPT's website
-- Make sure you're not hitting rate limits
-- Try refreshing the browser window that opened
-
-### Embedding Issues
-
-- **"Index not found"**: Run `python ingest.py` to create the index
-- **OpenAI API errors**: If using OpenAI embeddings, make sure `OPENAI_API_KEY` is set in `.env`
-- **Hugging Face errors**: If using Hugging Face embeddings, make sure `USE_HUGGINGFACE_EMBEDDINGS=true` is set
-
 ## Development
 
 ### Backend Development
