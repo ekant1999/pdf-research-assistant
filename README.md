@@ -1,14 +1,15 @@
 # PDF Research Assistant
 
-A RAG (Retrieval-Augmented Generation) system for querying research papers stored as PDFs. Built with LangGraph, FAISS, OpenAI, Flask, and React.
+A RAG (Retrieval-Augmented Generation) system for querying research papers stored as PDFs. Built with LangGraph, FAISS, ChatGPT Web App, Flask, and React.
 
 ## Features
 
 - 📄 Ingest multiple PDFs from a folder
 - 🔍 Semantic search with FAISS vector store
-- 🤖 OpenAI LLM support
+- 🤖 ChatGPT Web App integration (no API key required!)
 - 📝 Answers with numbered citations [1], [2], etc.
 - 🎨 Clean React UI with Flask backend
+- 💾 Persistent ChatGPT session (login once, use forever)
 
 ## Architecture
 
@@ -16,6 +17,7 @@ A RAG (Retrieval-Augmented Generation) system for querying research papers store
 - **Frontend**: Simple React UI (no build tools needed)
 - **RAG Pipeline**: LangGraph workflow (retrieve → generate)
 - **Vector Store**: FAISS
+- **LLM**: ChatGPT Web App via Playwright automation
 
 ## Setup
 
@@ -23,6 +25,7 @@ A RAG (Retrieval-Augmented Generation) system for querying research papers store
 
 ```bash
 pip install -r requirements.txt
+playwright install chromium
 ```
 
 ### 2. Configure Environment
@@ -33,11 +36,26 @@ Create a `.env` file:
 cp .env.example .env
 ```
 
-Edit `.env` and add your OpenAI API key:
+**For ChatGPT Web App (Recommended - No API Key Required):**
 
+Edit `.env` and configure embeddings:
+
+```bash
+# Use Hugging Face embeddings (free, no API key needed)
+USE_HUGGINGFACE_EMBEDDINGS=true
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+
+# Optional: ChatGPT web app settings
+CHATGPT_HEADLESS=false  # Set to true to run browser in background
 ```
+
+**For OpenAI API (Alternative):**
+
+If you prefer using OpenAI API for embeddings:
+
+```bash
 OPENAI_API_KEY=your_api_key_here
-PORT=5000  # Optional, defaults to 5000
+USE_HUGGINGFACE_EMBEDDINGS=false
 ```
 
 ### 3. Add PDFs
@@ -60,7 +78,7 @@ python ingest.py
 This will:
 - Read all PDFs from `data/papers/`
 - Split them into chunks (1200 chars, 200 overlap)
-- Create embeddings using OpenAI
+- Create embeddings using Hugging Face (or OpenAI if configured)
 - Save FAISS index to `index/`
 
 ### 5. Start Backend Server
@@ -69,11 +87,28 @@ This will:
 python server.py
 ```
 
-The server will start on `http://localhost:5001` (or the port specified in `.env`)
+The server will start on `http://localhost:5001`
 
-### 6. Open Frontend
+### 6. First-Time ChatGPT Login
 
-Simply open `frontend/index.html` in your browser, or serve it with a simple HTTP server:
+When you first use the ChatGPT App provider:
+
+1. A browser window will open automatically
+2. You'll see ChatGPT's login page
+3. **Log in to your ChatGPT account** in the browser window
+4. The system will wait for you to complete login (up to 5 minutes)
+5. Your session will be saved in `~/.chatgpt-browser` for future use
+6. You only need to log in once!
+
+### 7. Open Frontend
+
+The Flask server also serves the frontend. Simply open:
+
+```
+http://localhost:5001
+```
+
+Or serve it manually:
 
 ```bash
 # Option 1: Python
@@ -89,11 +124,13 @@ npx http-server -p 8000
 
 ## Usage
 
-1. Open the frontend in your browser
-2. Select your preferred OpenAI model in the sidebar
+1. Open the frontend in your browser (`http://localhost:5001`)
+2. Select **"ChatGPT App"** from the Provider dropdown
 3. The index is automatically loaded when the page opens
 4. Ask questions about your papers
 5. Get answers with citations!
+
+**Note**: The first time you use ChatGPT App, you'll need to log in. After that, your session is saved and you won't need to log in again.
 
 ## API Endpoints
 
@@ -104,8 +141,8 @@ npx http-server -p 8000
   ```json
   {
     "question": "What are the main findings?",
-    "provider": "openai",
-    "model": "gpt-4o-mini",
+    "provider": "chatgpt",
+    "model": "default",
     "k": 6
   }
   ```
@@ -113,10 +150,27 @@ npx http-server -p 8000
 
 ## LLM Provider
 
-### OpenAI
-- Models: gpt-4o-mini, gpt-4o, gpt-3.5-turbo
-- Requires: `OPENAI_API_KEY` in `.env`
-- Used for both embeddings and LLM generation
+### ChatGPT Web App (Recommended)
+
+- **Requires**: ChatGPT account (free)
+- **Setup**: Playwright + one-time login
+- **Cost**: Free (with your ChatGPT account)
+- **API Key**: Not required
+- **Session**: Persistent (login once, use forever)
+
+**Advantages:**
+- ✅ No API key needed
+- ✅ Free to use (with ChatGPT account)
+- ✅ No usage limits (subject to ChatGPT's terms)
+- ✅ Full access to ChatGPT's capabilities
+
+**Note**: The browser runs in non-headless mode by default so you can see and interact with it. Set `CHATGPT_HEADLESS=true` in `.env` to run in background.
+
+### Alternative Providers
+
+The system also supports:
+- **OpenAI API**: Requires `OPENAI_API_KEY`, pay-per-use
+- **Hugging Face**: Free models via Inference API, requires `HUGGINGFACE_API_KEY`
 
 ## Project Structure
 
@@ -129,18 +183,42 @@ npx http-server -p 8000
 │   ├── app.jsx
 │   └── styles.css
 ├── index/               # FAISS index (created after ingestion)
+├── chatgpt_web.py       # ChatGPT web app integration
 ├── ingest.py            # PDF ingestion pipeline
 ├── graph.py             # LangGraph workflow
 ├── server.py             # Flask backend
 ├── requirements.txt     # Dependencies
+├── CHATGPT_WEB_SETUP.md # Detailed ChatGPT setup guide
 └── .env                 # Environment variables
 ```
 
 ## Requirements
 
 - Python 3.10+
-- OpenAI API key (for embeddings and LLM generation)
+- Playwright + Chromium (for ChatGPT web app)
+- ChatGPT account (free)
 - Modern web browser (for React frontend)
+
+## Troubleshooting
+
+### ChatGPT Login Issues
+
+- **"ChatGPT requires login"**: Make sure you're logged into ChatGPT in the browser window that opened
+- **Browser not opening**: Check that Playwright is installed: `playwright --version` and `playwright install chromium`
+- **Session not persisting**: Check that `~/.chatgpt-browser` directory exists and has proper permissions
+
+### No Response from ChatGPT
+
+- ChatGPT may be slow to respond - wait a bit longer
+- The page structure may have changed - check ChatGPT's website
+- Make sure you're not hitting rate limits
+- Try refreshing the browser window that opened
+
+### Embedding Issues
+
+- **"Index not found"**: Run `python ingest.py` to create the index
+- **OpenAI API errors**: If using OpenAI embeddings, make sure `OPENAI_API_KEY` is set in `.env`
+- **Hugging Face errors**: If using Hugging Face embeddings, make sure `USE_HUGGINGFACE_EMBEDDINGS=true` is set
 
 ## Development
 
