@@ -87,17 +87,6 @@ Server runs on `http://localhost:5001`
   }
   ```
 
-## LLM Provider
-
-### ChatGPT Web App (Recommended)
-
-- ✅ No API key needed
-- ✅ Free (with ChatGPT account)
-- ✅ Persistent session (login once)
-- ⚠️ Requires Playwright + Chromium
-
-**Note**: Browser runs in non-headless mode by default. Set `CHATGPT_HEADLESS=true` in `.env` to run in background.
-
 ## Project Structure
 
 ```
