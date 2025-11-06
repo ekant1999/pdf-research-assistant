@@ -389,7 +389,28 @@ class ChatGPTWebLLM:
             
         except PlaywrightTimeoutError:
             raise ValueError(f"ChatGPT response timeout after {self.timeout}ms. The model might be slow or the page structure changed.")
+        except (BrokenPipeError, OSError) as e:
+            if isinstance(e, OSError) and e.errno == 32:
+                # Broken pipe - reset connection
+                self._initialized = False
+                self.context = None
+                self.page = None
+                raise ValueError(
+                    "Connection lost with ChatGPT web app. Please try again. "
+                    "If the error persists, make sure you're logged into ChatGPT."
+                )
+            raise ValueError(f"Connection error with ChatGPT: {str(e)}")
         except Exception as e:
+            error_msg = str(e)
+            if "Broken pipe" in error_msg or "Errno 32" in error_msg:
+                # Reset connection
+                self._initialized = False
+                self.context = None
+                self.page = None
+                raise ValueError(
+                    "Connection lost with ChatGPT web app. Please try again. "
+                    "If the error persists, make sure you're logged into ChatGPT."
+                )
             raise ValueError(f"Error communicating with ChatGPT: {str(e)}")
     
     def invoke(self, messages: List) -> str:
@@ -405,10 +426,56 @@ class ChatGPTWebLLM:
                     return future.result()
             else:
                 return loop.run_until_complete(self._send_message(prompt))
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(self._send_message(prompt))
+        except (RuntimeError, BrokenPipeError, OSError) as e:
+            # Handle broken pipe and event loop errors
+            if isinstance(e, BrokenPipeError) or (isinstance(e, OSError) and e.errno == 32):
+                # Reset initialization to force reconnection
+                self._initialized = False
+                if self.context:
+                    try:
+                        # Try to close context in a new loop
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        new_loop.run_until_complete(self.close())
+                        new_loop.close()
+                    except:
+                        pass
+                self.context = None
+                self.page = None
+                
+                # Retry once with a fresh connection
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(self._send_message(prompt))
+                except Exception as retry_error:
+                    raise ValueError(
+                        f"Connection error with ChatGPT web app. Please try again. "
+                        f"If the error persists, make sure you're logged into ChatGPT. "
+                        f"Error: {str(retry_error)}"
+                    )
+            else:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(self._send_message(prompt))
+        except Exception as e:
+            error_msg = str(e)
+            if "Broken pipe" in error_msg or "Errno 32" in error_msg:
+                # Reset and retry
+                self._initialized = False
+                self.context = None
+                self.page = None
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(self._send_message(prompt))
+                except Exception as retry_error:
+                    raise ValueError(
+                        f"Connection error with ChatGPT web app. Please try again. "
+                        f"If the error persists, make sure you're logged into ChatGPT. "
+                        f"Error: {str(retry_error)}"
+                    )
+            raise
     
     def _run_in_thread(self, prompt: str) -> str:
         """Run async message sending in a new event loop within a thread (for nested async contexts)."""
@@ -416,8 +483,27 @@ class ChatGPTWebLLM:
         asyncio.set_event_loop(new_loop)
         try:
             return new_loop.run_until_complete(self._send_message(prompt))
+        except (BrokenPipeError, OSError) as e:
+            if isinstance(e, OSError) and e.errno == 32:
+                # Broken pipe - reset and retry
+                self._initialized = False
+                self.context = None
+                self.page = None
+                # Retry in the same loop
+                return new_loop.run_until_complete(self._send_message(prompt))
+            raise
         finally:
-            new_loop.close()
+            try:
+                # Give pending tasks time to complete
+                pending = asyncio.all_tasks(new_loop)
+                if pending:
+                    new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except:
+                pass
+            try:
+                new_loop.close()
+            except:
+                pass
     
     def _format_messages(self, messages: List) -> str:
         """Format LangChain message objects (SystemMessage, HumanMessage) into a single prompt string for ChatGPT."""

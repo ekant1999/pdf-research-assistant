@@ -2,6 +2,91 @@ const { useState, useEffect, useRef } = React;
 
 const API_BASE = 'http://localhost:5001/api';
 
+function formatMarkdown(text) {
+    if (!text) return '';
+    
+    if (typeof marked !== 'undefined') {
+        let cleanedText = text;
+        
+        cleanedText = cleanedText
+            .replace(/\n([a-z_]+)\n([a-z_]+)\s*=\s*(\d+)/g, '\n$1_{$2} = $3')
+            .replace(/\s+([a-z_]+)\n([a-z_]+)\s*=\s*(\d+)/g, ' $1_{$2} = $3')
+            .replace(/position\s+([a-z])\n([a-z]+)\s/g, 'position $1_{$2} ')
+            .replace(/\s+([a-z])\n([a-z]+)\s+depends/g, ' $1_{$2} depends')
+            .replace(/\s+([a-z])\n([a-z]+)\s+</g, ' $1_{$2} <')
+            .replace(/\s+([a-z])\n([a-z]+)\s+>/g, ' $1_{$2} >')
+            .replace(/\s+([a-z])\n([a-z]+)\s+\./g, ' $1_{$2}.')
+            .replace(/\s+([a-z])\n([a-z]+)\s/g, ' $1_{$2} ')
+            .replace(/\n-\n∞/g, ' -∞')
+            .replace(/([a-z_]+)\n([a-z_]+)\s*=\s*(\d+)/g, '$1_{$2} = $3');
+        
+        const lines = cleanedText.split('\n');
+        const fixedLines = [];
+        let i = 0;
+        
+        while (i < lines.length) {
+            const line = lines[i].trim();
+            
+            if (!line) {
+                fixedLines.push('');
+                i++;
+                continue;
+            }
+            
+            if (i < lines.length - 1) {
+                const nextLine = lines[i + 1].trim();
+                const nextNextLine = i + 2 < lines.length ? lines[i + 2].trim() : '';
+                
+                if (line.match(/^[a-z]$/) && nextLine.match(/^[a-z]+$/) && nextNextLine.match(/^=\s*\d+$/)) {
+                    fixedLines.push(line + '_{' + nextLine + '} = ' + nextNextLine.replace('=', '').trim());
+                    i += 3;
+                    continue;
+                }
+                
+                if (line.match(/^[a-z]$/) && nextLine.match(/^[a-z]+$/)) {
+                    fixedLines.push(line + '_{' + nextLine + '}');
+                    i += 2;
+                    continue;
+                }
+            }
+            
+            fixedLines.push(line);
+            i++;
+        }
+        
+        cleanedText = fixedLines.join('\n');
+        
+        cleanedText = cleanedText
+            .replace(/([a-z_]+)_{([a-z_]+)}\s*=\s*(\d+)/g, function(match, p1, p2, p3) {
+                return '$' + p1 + '_{' + p2 + '} = ' + p3 + '$';
+            })
+            .replace(/([^$])([a-z_]+)_{([a-z_]+)}([^$])/g, function(match, before, p1, p2, after) {
+                return before + '$' + p1 + '_{' + p2 + '}$' + after;
+            });
+        
+        marked.setOptions({
+            breaks: false,
+            gfm: true,
+            headerIds: false,
+            mangle: false
+        });
+        
+        let html = marked.parse(cleanedText);
+        
+        if (typeof MathJax !== 'undefined') {
+            setTimeout(() => {
+                if (MathJax.typesetPromise) {
+                    MathJax.typesetPromise().catch((err) => console.log('MathJax error:', err));
+                }
+            }, 200);
+        }
+        
+        return html;
+    }
+    
+    return text.replace(/\n/g, '<br/>');
+}
+
 function App() {
     const chatHistoryRef = useRef(null);
     const [k, setK] = useState(6);
@@ -20,6 +105,13 @@ function App() {
     useEffect(() => {
         if (chatHistoryRef.current) {
             chatHistoryRef.current.scrollTop = chatHistoryRef.current.scrollHeight;
+        }
+        
+        // Re-render MathJax when new content is added
+        if (typeof MathJax !== 'undefined' && MathJax.typesetPromise) {
+            setTimeout(() => {
+                MathJax.typesetPromise().catch((err) => console.log('MathJax error:', err));
+            }, 200);
         }
     }, [history, loading]);
 
@@ -182,7 +274,10 @@ function App() {
                                     </div>
                                     <div className="message">
                                         <div className="answer">
-                                            <div dangerouslySetInnerHTML={{__html: item.answer.replace(/\n/g, '<br/>')}} />
+                                            <div 
+                                                className="markdown-content"
+                                                dangerouslySetInnerHTML={{__html: formatMarkdown(item.answer)}} 
+                                            />
                                             {item.sources && item.sources.length > 0 && (
                                                 <div className="sources" style={{marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e9ecef'}}>
                                                     <div className="sources-title" style={{fontSize: '0.85em', fontWeight: 600, marginBottom: '8px', color: '#6c757d'}}>📄 Sources:</div>
