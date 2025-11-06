@@ -1,8 +1,5 @@
-"""
-Flask backend for PDF RAG system
-"""
 import os
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 from pathlib import Path
@@ -19,14 +16,14 @@ graph = None
 current_settings = None
 
 def reset_graph_cache():
-    """Reset the graph cache to force recreation."""
+    """Reset the graph cache to force recreation on next request."""
     global graph, current_settings
     graph = None
     current_settings = None
 
 
 def init_vectorstore():
-    """Initialize the vectorstore."""
+    """Initialize and load the FAISS vectorstore from disk. Validates index directory exists."""
     global vectorstore
     if vectorstore is None:
         index_dir = "index"
@@ -37,18 +34,17 @@ def init_vectorstore():
     return vectorstore
 
 
-def get_or_create_graph(provider="openai", model=None, k=6):
-    """Get or create graph with given settings."""
+def get_or_create_graph(k=6):
+    """Get existing graph or create new one with specified k value. Recreates graph if k changes."""
     global graph, current_settings, vectorstore
     
     if vectorstore is None:
         vectorstore = init_vectorstore()
     
-    settings = (provider, model, k)
+    settings = k
     
-    # Always recreate graph if settings changed
     if graph is None or current_settings != settings:
-        llm = get_llm(provider=provider, model=model)
+        llm = get_llm()
         graph = create_graph(vectorstore, llm, k=k)
         current_settings = settings
     
@@ -57,13 +53,13 @@ def get_or_create_graph(provider="openai", model=None, k=6):
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    """Health check endpoint."""
+    """Health check endpoint to verify server is running."""
     return jsonify({"status": "ok", "message": "Server is running"})
 
 
 @app.route("/api/index/status", methods=["GET"])
 def index_status():
-    """Check if index is loaded."""
+    """Check if the vectorstore index is loaded and ready."""
     try:
         if vectorstore is None:
             init_vectorstore()
@@ -80,7 +76,7 @@ def index_status():
 
 @app.route("/api/index/load", methods=["POST"])
 def load_index():
-    """Load the index."""
+    """Load or reload the vectorstore index. Resets graph cache to force recreation."""
     global vectorstore, graph, current_settings
     try:
         vectorstore = init_vectorstore()
@@ -99,7 +95,7 @@ def load_index():
 
 @app.route("/api/ask", methods=["POST"])
 def ask_question():
-    """Ask a question and get answer with citations."""
+    """Process a question: retrieve relevant chunks, generate answer with citations, and return results with sources."""
     try:
         data = request.get_json()
         
@@ -110,28 +106,10 @@ def ask_question():
             }), 400
         
         question = data["question"]
-        provider = data.get("provider", "openai")
-        model = data.get("model", None)
-        
-        if model:
-            model = model.strip()
-        if not model:
-            # Set default based on provider
-            if provider.lower() == "huggingface":
-                model = "mistralai/Mistral-7B-Instruct-v0.2"
-            elif provider.lower() == "chatgpt" or provider.lower() == "chatgpt-web" or provider.lower() == "chatgpt_app":
-                model = "default"
-            else:
-                model = "gpt-4o-mini"
-        
         k = data.get("k", 6)
         
-        # Reset graph cache if provider changed to ensure we use the right LLM
-        if current_settings and current_settings[0] != provider.lower():
-            reset_graph_cache()
-        
         try:
-            graph = get_or_create_graph(provider=provider, model=model, k=k)
+            graph = get_or_create_graph(k=k)
         except Exception as e:
             error_msg = str(e)
             if "index" in error_msg.lower() or "not found" in error_msg.lower():
@@ -139,15 +117,10 @@ def ask_question():
                     "status": "error",
                     "message": "Index not found. Please run 'python ingest.py' to create the index."
                 }), 400
-            elif "quota" in error_msg.lower() or "insufficient_quota" in error_msg.lower():
-                return jsonify({
-                    "status": "error",
-                    "message": f"OpenAI API quota exceeded. Make sure you're using the ChatGPT App provider, not OpenAI API. Error: {error_msg}"
-                }), 400
             else:
                 return jsonify({
                     "status": "error",
-                    "message": f"Failed to initialize: {error_msg}"
+                    "message": f"Failed to initialize ChatGPT Web LLM: {error_msg}"
                 }), 500
         
         initial_state = {
@@ -190,42 +163,16 @@ def ask_question():
         }), 500
 
 
-@app.route("/api/providers", methods=["GET"])
-def get_providers():
-    """Get available LLM providers and models."""
-    return jsonify({
-        "providers": {
-            "openai": {
-                "models": ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
-                "default": "gpt-4o-mini"
-            },
-            "huggingface": {
-                "models": [
-                    "mistralai/Mistral-7B-Instruct-v0.2",
-                    "google/flan-t5-large",
-                    "google/flan-t5-base",
-                    "microsoft/DialoGPT-medium"
-                ],
-                "default": "mistralai/Mistral-7B-Instruct-v0.2"
-            },
-            "chatgpt": {
-                "models": ["default"],
-                "default": "default",
-                "note": "Uses ChatGPT web app (requires manual login)"
-            }
-        }
-    })
 
 
 @app.route("/", methods=["GET"])
 def serve_index():
-    """Serve the frontend index.html."""
+    """Serve the main frontend HTML file."""
     return send_file('frontend/index.html')
 
 @app.route("/<path:path>")
 def serve_frontend(path):
-    """Serve frontend static files (CSS, JS, etc.)."""
-    # Skip API routes
+    """Serve frontend static files (CSS, JS, etc.). Skips API routes."""
     if path.startswith('api/'):
         return jsonify({"error": "Not found"}), 404
     

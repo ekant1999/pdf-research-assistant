@@ -4,29 +4,12 @@ const API_BASE = 'http://localhost:5001/api';
 
 function App() {
     const chatHistoryRef = useRef(null);
-    const [provider, setProvider] = useState('chatgpt');
-    const [model, setModel] = useState('default');
     const [k, setK] = useState(6);
     const [indexStatus, setIndexStatus] = useState('loading');
     const [question, setQuestion] = useState('');
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-
-    // Provider-specific models
-    const providerModels = {
-        openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
-        huggingface: ['mistralai/Mistral-7B-Instruct-v0.2', 'google/flan-t5-large', 'google/flan-t5-base', 'microsoft/DialoGPT-medium'],
-        chatgpt: ['default']
-    };
-
-    // Update model when provider changes
-    useEffect(() => {
-        const defaultModel = provider === 'openai' ? 'gpt-4o-mini' : 
-                            provider === 'chatgpt' ? 'default' : 
-                            'mistralai/Mistral-7B-Instruct-v0.2';
-        setModel(defaultModel);
-    }, [provider]);
 
     // Auto-load index on mount
     useEffect(() => {
@@ -92,8 +75,6 @@ function App() {
                 },
                 body: JSON.stringify({
                     question: currentQuestion,
-                    provider: provider,
-                    model,
                     k
                 })
             });
@@ -149,25 +130,12 @@ function App() {
                     
                     <div className="config-section">
                         <label>Provider</label>
-                        <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                            <option value="chatgpt">ChatGPT App</option>
-                            <option value="openai">OpenAI API</option>
-                            <option value="huggingface">Hugging Face (Free)</option>
-                        </select>
-                    </div>
-
-                    <div className="config-section">
-                        <label>Model</label>
-                        <select value={model} onChange={(e) => setModel(e.target.value)} disabled={provider === 'chatgpt'}>
-                            {providerModels[provider]?.map(m => (
-                                <option key={m} value={m}>{m}</option>
-                            ))}
-                        </select>
-                        {provider === 'chatgpt' && (
-                            <small style={{display: 'block', color: '#666', marginTop: '4px', fontSize: '0.85em'}}>
-                                Uses ChatGPT web app
-                            </small>
-                        )}
+                        <div style={{padding: '8px 12px', background: '#f8f9fa', borderRadius: '8px', fontSize: '0.9em', color: '#666'}}>
+                            ChatGPT Web App
+                        </div>
+                        <small style={{display: 'block', color: '#666', marginTop: '4px', fontSize: '0.85em'}}>
+                            Uses ChatGPT web app (requires manual login)
+                        </small>
                     </div>
 
                     <div className="config-section">

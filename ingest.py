@@ -1,40 +1,35 @@
-"""
-PDF Ingestion Pipeline
-Reads PDFs from data/papers/, splits them, embeds, and stores in FAISS.
-"""
 import os
 from pathlib import Path
 from typing import List
 import pickle
 
 try:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
 except ImportError:
     try:
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-    except ImportError:
         from langchain_core.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from dotenv import load_dotenv
 import sys
 
-# Try to import Hugging Face embeddings
 try:
     from langchain_community.embeddings import HuggingFaceEmbeddings
 except ImportError:
     try:
         from langchain_huggingface import HuggingFaceEmbeddings
     except ImportError:
-        HuggingFaceEmbeddings = None
+        print(" Error: HuggingFaceEmbeddings not found. Please install langchain-community or langchain-huggingface.")
+        sys.exit(1)
 
 load_dotenv()
 
 
 def load_pdfs(papers_dir: str) -> List:
-    """Load all PDFs from the papers directory."""
+    """Load all PDF files from the papers directory. Extracts text and metadata from each PDF."""
     papers_path = Path(papers_dir)
     if not papers_path.exists():
         papers_path.mkdir(parents=True, exist_ok=True)
@@ -69,7 +64,7 @@ def load_pdfs(papers_dir: str) -> List:
 
 
 def split_documents(documents: List, chunk_size: int = 1200, chunk_overlap: int = 200) -> List:
-    """Split documents into chunks."""
+    """Split documents into smaller chunks for embedding. Uses recursive character splitting with overlap."""
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
@@ -82,58 +77,33 @@ def split_documents(documents: List, chunk_size: int = 1200, chunk_overlap: int 
 
 
 def create_faiss_index(chunks: List, index_dir: str = "index/"):
-    """Create FAISS vector store and save it."""
+    """Create FAISS vectorstore from chunks. Generates embeddings and saves index to disk with metadata."""
     if not chunks:
         print("No chunks to index")
         return
     
     print("Creating embeddings...")
     
-    # Check if we should use Hugging Face embeddings
-    use_hf_embeddings = os.getenv("USE_HUGGINGFACE_EMBEDDINGS", "false").lower() == "true"
-    
-    if use_hf_embeddings and HuggingFaceEmbeddings is not None:
-        try:
-            model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-            print(f"Using Hugging Face embeddings: {model_name}")
-            embeddings = HuggingFaceEmbeddings(
-                model_name=model_name,
-                model_kwargs={'device': 'cpu'}
-            )
-            print("✓ Hugging Face embeddings initialized")
-        except Exception as e:
-            print(f"⚠ Error initializing Hugging Face embeddings: {e}")
-            print("Falling back to OpenAI embeddings...")
-            use_hf_embeddings = False
-    
-    if not use_hf_embeddings:
-        try:
-            embeddings = OpenAIEmbeddings()
-            print("Using OpenAI embeddings")
-        except Exception as e:
-            print(f"❌ Error initializing OpenAI embeddings: {e}")
-            print("Please check your .env file and ensure OPENAI_API_KEY is set correctly.")
-            sys.exit(1)
+    try:
+        model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        print(f"Using Hugging Face embeddings: {model_name}")
+        embeddings = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={'device': 'cpu'}
+        )
+        print("✓ Hugging Face embeddings initialized")
+    except Exception as e:
+        print(f" Error initializing Hugging Face embeddings: {e}")
+        print("Please check that the model name is correct and you have the required dependencies installed.")
+        sys.exit(1)
     
     print("Building FAISS index...")
     print(f"  This may take a few minutes for {len(chunks)} chunks...")
     try:
         vectorstore = FAISS.from_documents(chunks, embeddings)
     except Exception as e:
-        error_msg = str(e)
-        if "quota" in error_msg.lower() or "insufficient_quota" in error_msg.lower() or "429" in error_msg:
-            print("\n" + "=" * 50)
-            print("❌ OpenAI API Quota Exceeded")
-            print("=" * 50)
-            print("Your OpenAI API quota has been exceeded.")
-            print("\nTo fix this:")
-            print("1. Check your billing at: https://platform.openai.com/account/billing")
-            print("2. Add credits or upgrade your plan")
-            print("3. Once you have quota, run this script again")
-            print("=" * 50)
-        else:
-            print(f"\n❌ Error creating embeddings: {e}")
-            print("Please check your OpenAI API key and try again.")
+        print(f"\n Error creating embeddings: {e}")
+        print("Please check your configuration and try again.")
         sys.exit(1)
     
     index_path = Path(index_dir)
@@ -149,12 +119,12 @@ def create_faiss_index(chunks: List, index_dir: str = "index/"):
             pickle.dump(metadata, f)
         print(f"✓ Saved metadata to {metadata_file}")
     except Exception as e:
-        print(f"❌ Error saving index: {e}")
+        print(f" Error saving index: {e}")
         sys.exit(1)
 
 
 def main():
-    """Main ingestion pipeline."""
+    """Main ingestion pipeline: load PDFs, split into chunks, create and save FAISS index."""
     papers_dir = "data/papers"
     index_dir = "index"
     

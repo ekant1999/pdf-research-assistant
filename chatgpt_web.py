@@ -1,20 +1,16 @@
-"""
-ChatGPT Web Interface Integration
-Uses Playwright to interact with ChatGPT's web application
-"""
 import asyncio
 import os
 import json
+import subprocess
 from typing import List, Optional
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import async_playwright, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
 
 
 class ChatGPTWebLLM:
-    """Wrapper for ChatGPT web interface using Playwright."""
+    """Wrapper for ChatGPT web interface using Playwright automation."""
     
     def __init__(self, headless: bool = True, timeout: int = 60000):
-        """
-        Initialize ChatGPT Web LLM.
+        """Initialize ChatGPT Web LLM wrapper.
         
         Args:
             headless: Run browser in headless mode (default: True)
@@ -22,24 +18,21 @@ class ChatGPTWebLLM:
         """
         self.headless = headless
         self.timeout = timeout
-        self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
         self.playwright = None
         self._initialized = False
     
     async def _initialize(self):
-        """Initialize Playwright and open ChatGPT."""
+        """Initialize Playwright browser and navigate to ChatGPT. Handles login detection and waits for user login if needed."""
         if self._initialized:
             return
         
         self.playwright = await async_playwright().start()
         
-        # Use persistent context to maintain login session
         user_data_dir = os.path.expanduser("~/.chatgpt-browser")
         os.makedirs(user_data_dir, exist_ok=True)
         
-        # Clean up any existing singleton locks
         singleton_lock = os.path.join(user_data_dir, "SingletonLock")
         if os.path.exists(singleton_lock):
             try:
@@ -47,9 +40,7 @@ class ChatGPTWebLLM:
             except:
                 pass
         
-        # Kill any existing Chromium processes using this directory
         try:
-            import subprocess
             result = subprocess.run(
                 ['pgrep', '-f', f'.*{user_data_dir}.*'],
                 capture_output=True,
@@ -98,18 +89,14 @@ class ChatGPTWebLLM:
             else:
                 raise
         
-        # Get or create a page
         if len(self.context.pages) > 0:
             self.page = self.context.pages[0]
         else:
             self.page = await self.context.new_page()
         
-        # Navigate to ChatGPT
         try:
             await self.page.goto('https://chat.openai.com', wait_until='domcontentloaded', timeout=30000)
             await asyncio.sleep(3)
-            
-            # Check if we need to login
             login_indicators = [
                 self.page.locator('text=Log in').first,
                 self.page.locator('button:has-text("Log in")').first,
@@ -135,7 +122,6 @@ class ChatGPTWebLLM:
                     print("The system will wait for you to complete login...")
                     print("="*60 + "\n")
                     
-                    # Wait for login to complete
                     max_wait = 300
                     waited = 0
                     while waited < max_wait:
@@ -169,12 +155,11 @@ class ChatGPTWebLLM:
             raise ValueError("Failed to load ChatGPT. Please check your internet connection.")
     
     async def _send_message(self, message: str) -> str:
-        """Send a message to ChatGPT and wait for response."""
+        """Send a message to ChatGPT and wait for response. Handles finding input field, entering text, submitting, and extracting response."""
         if not self._initialized:
             await self._initialize()
         
         try:
-            # Ensure page is valid
             if self.page is None or self.page.is_closed():
                 self._initialized = False
                 await self._initialize()
@@ -196,7 +181,6 @@ class ChatGPTWebLLM:
                 await self.page.goto('https://chat.openai.com', wait_until='domcontentloaded', timeout=30000)
                 await asyncio.sleep(3)
             
-            # Wait for any previous loading to complete
             await self.page.wait_for_timeout(2000)
             loading_selectors = ['button[aria-label*="Stop"]', 'div[class*="loading"]', 'div[class*="typing"]']
             for loading_sel in loading_selectors:
@@ -214,14 +198,12 @@ class ChatGPTWebLLM:
             
             await asyncio.sleep(2)
             
-            # Scroll to bottom to ensure input field is visible
             try:
                 await self.page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
                 await asyncio.sleep(1)
             except:
                 pass
             
-            # Find input field
             textarea_selectors = [
                 'div[contenteditable="true"]',
                 'div[contenteditable][role="textbox"]',
@@ -244,7 +226,6 @@ class ChatGPTWebLLM:
                     textarea = None
                     continue
             
-            # Fallback: try to find any input element
             if textarea is None:
                 try:
                     all_inputs = await self.page.query_selector_all('div[contenteditable], textarea, input[type="text"]')
@@ -270,7 +251,6 @@ class ChatGPTWebLLM:
             if textarea is None:
                 raise ValueError("Could not find ChatGPT input field. The page structure may have changed.")
             
-            # Enter message
             try:
                 tag_name = await textarea.evaluate('el => el.tagName.toLowerCase()')
                 is_contenteditable = tag_name == 'div' or await textarea.evaluate('el => el.contentEditable === "true"')
@@ -292,7 +272,6 @@ class ChatGPTWebLLM:
                 await textarea.fill(message)
                 await asyncio.sleep(0.5)
             
-            # Count messages before sending
             try:
                 initial_message_count = await self.page.evaluate('''() => {
                     const messages = Array.from(document.querySelectorAll('div[data-message-author-role="assistant"]'));
@@ -301,7 +280,6 @@ class ChatGPTWebLLM:
             except:
                 initial_message_count = 0
             
-            # Send message
             try:
                 await textarea.press('Enter')
                 await asyncio.sleep(2)
@@ -317,7 +295,6 @@ class ChatGPTWebLLM:
                 except:
                     raise ValueError("Failed to send message to ChatGPT")
             
-            # Wait for response
             await self.page.wait_for_timeout(3000)
             
             response_selectors = [
@@ -364,7 +341,6 @@ class ChatGPTWebLLM:
                 await asyncio.sleep(2)
                 waited += 2
             
-            # Get response
             for selector in response_selectors:
                 try:
                     assistant_messages = self.page.locator(selector)
@@ -380,7 +356,6 @@ class ChatGPTWebLLM:
                 except:
                     continue
             
-            # Fallback: use JavaScript to find response
             page_text = await self.page.evaluate(f'''(initialCount) => {{
                 const selectors = [
                     'div[data-message-author-role="assistant"]',
@@ -418,7 +393,7 @@ class ChatGPTWebLLM:
             raise ValueError(f"Error communicating with ChatGPT: {str(e)}")
     
     def invoke(self, messages: List) -> str:
-        """Synchronous wrapper for invoke."""
+        """Synchronous interface for LangChain. Formats messages and sends to ChatGPT, handling async execution."""
         prompt = self._format_messages(messages)
         
         try:
@@ -436,7 +411,7 @@ class ChatGPTWebLLM:
             return loop.run_until_complete(self._send_message(prompt))
     
     def _run_in_thread(self, prompt: str) -> str:
-        """Run async function in a new event loop in a thread."""
+        """Run async message sending in a new event loop within a thread (for nested async contexts)."""
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
         try:
@@ -445,7 +420,7 @@ class ChatGPTWebLLM:
             new_loop.close()
     
     def _format_messages(self, messages: List) -> str:
-        """Format messages into a single prompt for ChatGPT."""
+        """Format LangChain message objects (SystemMessage, HumanMessage) into a single prompt string for ChatGPT."""
         system_content = None
         user_content = None
         
@@ -495,14 +470,11 @@ class ChatGPTWebLLM:
             return "\n\n".join(formatted_parts)
     
     async def close(self):
-        """Close the browser and cleanup."""
+        """Close browser context and cleanup Playwright resources."""
         if self.context:
             await self.context.close()
-        if self.browser:
-            await self.browser.close()
         if self.playwright:
             await self.playwright.stop()
         self._initialized = False
         self.context = None
         self.page = None
-        self.browser = None
